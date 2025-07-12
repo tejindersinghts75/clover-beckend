@@ -1,107 +1,65 @@
-// File: /api/create-payment-link.js
-import fetch from "node-fetch"
+import fetch from "node-fetch";
+
+// Replace with your actual Clover sandbox credentials
+const CLOVER_API_KEY = "YOUR_CLOVER_API_KEY";
+const MERCHANT_ID = "YOUR_MERCHANT_ID";
 
 export default async function handler(req, res) {
-  const { amount, discount } = req.body
-
-  const merchantId = process.env.CLOVER_MERCHANT_ID
-  const token = process.env.CLOVER_ACCESS_TOKEN
-  const baseUrl = `https://sandbox.dev.clover.com/v3/merchants/${merchantId}`
+  if (req.method !== "POST") {
+    return res.status(405).json({ message: "Only POST allowed" });
+  }
 
   try {
-    // 1. Create order
-    const orderRes = await fetch(`${baseUrl}/orders`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-    })
-    const order = await orderRes.json()
+    const { amount, discount } = JSON.parse(req.body);
 
-    // 2. Add line item to order
-    const lineItemRes = await fetch(`${baseUrl}/orders/${order.id}/line_items`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: "Product",
-        price: Math.round(Number(amount) * 100), // cents
-        quantity: 1,
-      }),
-    })
-
-    // 3. Add discount (if any)
-    if (discount && Number(discount) > 0) {
-      await fetch(`${baseUrl}/orders/${order.id}/discounts`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: `${discount}% Off`,
-          percentage: Number(discount) * 100, // Clover needs percent * 100
-        }),
-      })
+    if (!amount || !discount) {
+      return res.status(400).json({ error: "Amount and discount are required" });
     }
 
-    // 4. Create payment link
-    const paymentLinkRes = await fetch(`${baseUrl}/pay/link`, {
+    const discountedAmount = amount - (amount * discount) / 100;
+
+    // Optional: Create order first (Clover may not require this for pay/link)
+    // const orderRes = await fetch(`https://sandbox.dev.clover.com/v3/merchants/${MERCHANT_ID}/orders`, {
+    //   method: "POST",
+    //   headers: {
+    //     Authorization: `Bearer ${CLOVER_API_KEY}`,
+    //     "Content-Type": "application/json"
+    //   },
+    //   body: JSON.stringify({})
+    // });
+
+    // const order = await orderRes.json();
+
+    // Call /pay/link with discounted amount
+    const linkRes = await fetch(`https://sandbox.dev.clover.com/v3/merchants/${MERCHANT_ID}/pay/link`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+        Authorization: `Bearer ${CLOVER_API_KEY}`,
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        amount: Math.round(Number(amount) * 100),
-        orderId: order.id,
-        currency: "USD",
-        receiptEmail: "customer@example.com",
-      }),
-    })
+        amount: Math.round(discountedAmount),
+        currency: "USD"
+        // orderId: order.id  // <- Only if Clover supports this here
+      })
+    });
 
-    const link = await paymentLinkRes.json()
-    res.status(200).json({ url: link.url })
+    const contentType = linkRes.headers.get("content-type") || "";
+
+    if (!linkRes.ok) {
+      const errorText = await linkRes.text();
+      throw new Error(`Clover API error (${linkRes.status}): ${errorText}`);
+    }
+
+    if (!contentType.includes("application/json")) {
+      const errorText = await linkRes.text();
+      throw new Error(`Unexpected response format: ${errorText}`);
+    }
+
+    const link = await linkRes.json();
+    res.status(200).json({ paymentLink: link.url });
+
   } catch (err) {
-    console.error("Error:", err)
-    res.status(500).json({ error: "Something went wrong" })
+    res.status(500).json({ error: err.message });
   }
 }
-
-
-
-
-
-
-// export default async function handler(req, res) {
-//   const { CLOVER_ACCESS_TOKEN, CLOVER_MERCHANT_ID } = process.env;
-
-//   if (!CLOVER_ACCESS_TOKEN || !CLOVER_MERCHANT_ID) {
-//     return res.status(500).json({ error: "Missing Clover credentials" });
-//   }
-
-//   try {
-//     const response = await fetch(
-//       `https://sandbox.dev.clover.com/v3/merchants/${CLOVER_MERCHANT_ID}`,
-//       {
-//         headers: {
-//           Authorization: `Bearer ${CLOVER_ACCESS_TOKEN}`,
-//           Accept: 'application/json',
-//         },
-//       }
-//     );
-
-//     if (!response.ok) {
-//       const err = await response.json();
-//       return res.status(response.status).json({ error: err });
-//     }
-
-//     const data = await response.json();
-//     res.status(200).json({ merchant: data });
-//   } catch (err) {
-//     res.status(500).json({ error: 'Failed to fetch from Clover', details: err.message });
-//   }
-// }
