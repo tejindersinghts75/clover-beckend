@@ -1,46 +1,44 @@
-import axios from 'axios';
+import fetch from "node-fetch";
+
+const CLOVER_API_KEY = "YOUR_CLOVER_API_KEY";
+const MERCHANT_ID = "YOUR_MERCHANT_ID";
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Method not allowed' });
+  if (req.method !== "POST") {
+    return res.status(405).json({ message: "Only POST requests allowed" });
   }
-
-  const { code } = req.body;
-  const CLOVER_API_KEY = process.env.CLOVER_API_KEY;
-  const CLOVER_MERCHANT_ID = process.env.CLOVER_MERCHANT_ID;
-  const CLOVER_ORDER_ID = "YOUR_ORDER_ID"; // Dynamically fetch this in real use
 
   try {
-    // 1. Validate the discount code (replace with your logic)
-    const isValid = await validateDiscountCode(code);
-    if (!isValid) {
-      return res.status(400).json({ message: "Invalid discount code" });
+    const { discount } = JSON.parse(req.body);
+
+    if (!discount) {
+      return res.status(400).json({ error: "Discount is required" });
     }
 
-    // 2. Apply discount to Clover order via API
-    const response = await axios.post(
-      `https://api.clover.com/v3/merchants/${CLOVER_MERCHANT_ID}/orders/${CLOVER_ORDER_ID}/discounts`,
-      {
-        name: "Custom Discount",
-        type: "FIXED", // or "PERCENT"
-        amount: 1000, // $10.00 (in cents) or percentage (e.g., 10 for 10%)
+    const originalAmount = 1000; // ₹10 or $10 in cents
+    const discountedAmount = Math.round(originalAmount - (originalAmount * discount) / 100);
+
+    const response = await fetch(`https://sandbox.dev.clover.com/v3/merchants/${MERCHANT_ID}/pay/link`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${CLOVER_API_KEY}`,
+        "Content-Type": "application/json"
       },
-      {
-        headers: {
-          Authorization: `Bearer ${CLOVER_API_KEY}`,
-        },
-      }
-    );
+      body: JSON.stringify({
+        amount: discountedAmount,
+        currency: "USD"
+      })
+    });
 
-    res.status(200).json({ message: "Discount applied successfully!" });
-  } catch (error) {
-    console.error("Clover API error:", error.response?.data);
-    res.status(500).json({ message: "Failed to apply discount" });
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok || !contentType.includes("application/json")) {
+      const errorText = await response.text();
+      throw new Error(`Clover error: ${errorText}`);
+    }
+
+    const data = await response.json();
+    res.status(200).json({ paymentLink: data.url });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-}
-
-// Mock validation (replace with DB lookup)
-async function validateDiscountCode(code) {
-  const validCodes = ["SAVE10", "FREESHIP"];
-  return validCodes.includes(code);
 }
