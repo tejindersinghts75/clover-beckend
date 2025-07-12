@@ -2,7 +2,12 @@ export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ message: "Only POST requests allowed" });
   }
-
+ // ✅ Validate env variables
+  if (!process.env.CLOVER_API_KEY || !process.env.CLOVER_MERCHANT_ID) {
+    return res.status(500).json({ 
+      error: "Clover API credentials not configured. Check server environment variables.",
+    });
+  }
   try {
     // ✅ Check if req.body is already an object (parsed by Next.js/Express)
     const { discount } = typeof req.body === "object" ? req.body : JSON.parse(req.body);
