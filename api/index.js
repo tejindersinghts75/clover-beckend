@@ -1,7 +1,7 @@
 import fetch from "node-fetch";
 
-const CLOVER_API_KEY = "YOUR_CLOVER_API_KEY";
-const MERCHANT_ID = "YOUR_MERCHANT_ID";
+const CLOVER_API_KEY = process.env.CLOVER_API_KEY;
+const MERCHANT_ID = process.env.CLOVER_MERCHANT_ID;
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
