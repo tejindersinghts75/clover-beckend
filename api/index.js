@@ -11,16 +11,38 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { discountName, discountValue, orderId } = req.body;
+    // Now only expecting 'discount' in the body
+    const { discount } = req.body;
     
-    // Validate inputs
-    if (!discountName || typeof discountValue !== "number" || !orderId) {
+    if (typeof discount !== "number" || discount < 0 || discount > 100) {
       return res.status(400).json({ 
-        error: "Missing required fields: discountName, discountValue, orderId" 
+        error: "Discount must be a number between 0-100" 
       });
     }
 
-    // Create discount
+    // 1. First create an order
+    const orderResponse = await fetch(
+      `https://sandbox.dev.clover.com/v3/merchants/${CLOVER_MERCHANT_ID}/orders`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${CLOVER_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          currency: "USD"
+        })
+      }
+    );
+
+    if (!orderResponse.ok) {
+      const error = await orderResponse.text();
+      throw new Error(`Order creation failed: ${error}`);
+    }
+
+    const { id: orderId } = await orderResponse.json();
+
+    // 2. Create and apply discount
     const discountResponse = await fetch(
       `https://sandbox.dev.clover.com/v3/merchants/${CLOVER_MERCHANT_ID}/discounts`,
       {
@@ -30,10 +52,9 @@ export default async function handler(req, res) {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          name: discountName,
-          amount: Math.abs(discountValue) * 100, // Convert to cents
-          percentage: discountValue < 0 ? Math.abs(discountValue) * 100 : 0,
-          type: discountValue < 0 ? "PERCENTAGE" : "FIXED_AMOUNT"
+          name: `${discount}% Off Discount`,
+          percentage: discount * 100, // Clover expects percentage as 1000 for 10%
+          type: "PERCENTAGE"
         })
       }
     );
@@ -45,8 +66,8 @@ export default async function handler(req, res) {
 
     const { id: discountId } = await discountResponse.json();
 
-    // Apply discount to order
-    const orderUpdateResponse = await fetch(
+    // 3. Apply discount to order
+    const applyResponse = await fetch(
       `https://sandbox.dev.clover.com/v3/merchants/${CLOVER_MERCHANT_ID}/orders/${orderId}/discounts`,
       {
         method: "POST",
@@ -55,29 +76,47 @@ export default async function handler(req, res) {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          discounts: [{
-            id: discountId
-          }]
+          discounts: [{ id: discountId }]
         })
       }
     );
 
-    if (!orderUpdateResponse.ok) {
-      const error = await orderUpdateResponse.text();
+    if (!applyResponse.ok) {
+      const error = await applyResponse.text();
       throw new Error(`Discount application failed: ${error}`);
+    }
+
+    // 4. Create payment link
+    const paymentResponse = await fetch(
+      `https://sandbox.dev.clover.com/v3/merchants/${CLOVER_MERCHANT_ID}/orders/${orderId}/payments`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${CLOVER_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          amount: 10000, // $100 base amount for example
+          currency: "USD"
+        })
+      }
+    );
+
+    if (!paymentResponse.ok) {
+      const error = await paymentResponse.text();
+      throw new Error(`Payment creation failed: ${error}`);
     }
 
     res.status(200).json({ 
       success: true,
-      discountId,
-      orderId
+      orderId,
+      discountApplied: `${discount}%`
     });
 
   } catch (err) {
-    console.error("Discount Error:", err);
+    console.error("Error:", err);
     res.status(500).json({ 
-      error: err.message || "Discount processing failed",
-      details: process.env.NODE_ENV === "development" ? err.stack : null
+      error: err.message || "Processing failed"
     });
   }
 }
