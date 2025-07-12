@@ -1,50 +1,58 @@
 import fetch from "node-fetch";
 
 export default async function handler(req, res) {
+  // 1. Method Check
   if (req.method !== "POST") {
-    return res.status(405).json({ message: "Only POST requests allowed" });
+    return res.status(405).json({ message: "Method not allowed" });
   }
 
-  // ✅ Validate env variables
-  if (!process.env.CLOVER_API_KEY || !process.env.CLOVER_MERCHANT_ID) {
-    return res.status(500).json({ 
-      error: "Clover API credentials not configured. Check server environment variables.",
-    });
+  // 2. Env Validation
+  const { CLOVER_API_KEY, CLOVER_MERCHANT_ID } = process.env;
+  if (!CLOVER_API_KEY || !CLOVER_MERCHANT_ID) {
+    return res.status(500).json({ error: "Server misconfiguration" });
+  }
+
+  // 3. Input Validation
+  const { discount } = req.body;
+  if (typeof discount !== "number" || discount < 0 || discount > 100) {
+    return res.status(400).json({ error: "Invalid discount (0-100 required)" });
   }
 
   try {
-    const { discount } = req.body; // No need for JSON.parse (Next.js auto-parses)
+    // 4. Calculate Amount
+    const amount = Math.round(1000 * (1 - discount / 100)); // $10 base
 
-    if (discount === undefined || discount === null) {
-      return res.status(400).json({ error: "Discount is required" });
-    }
-
-    const originalAmount = 1000; // $10 in cents
-    const discountedAmount = Math.round(originalAmount - (originalAmount * discount) / 100);
-
-    const response = await fetch(
-      `https://sandbox.dev.clover.com/v3/merchants/${process.env.CLOVER_MERCHANT_ID}/pay/link`,
+    // 5. Call Clover API (Updated Endpoint)
+    const cloverResponse = await fetch(
+      `https://sandbox.dev.clover.com/v3/merchants/${CLOVER_MERCHANT_ID}/payment_links`,
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${process.env.CLOVER_API_KEY}`,
+          "Authorization": `Bearer ${CLOVER_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          amount: discountedAmount,
+          amount,
           currency: "USD",
+          description: `Discounted payment (${discount}% off)`,
         }),
       }
     );
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Clover API error: ${errorText}`);
+    // 6. Handle Response
+    if (!cloverResponse.ok) {
+      const error = await cloverResponse.json();
+      throw new Error(`Clover Error: ${error.message || "Unknown error"}`);
     }
 
-    const data = await response.json();
-    res.status(200).json({ paymentLink: data.url });
+    const { payment_link: { url } } = await cloverResponse.json();
+    res.status(200).json({ paymentLink: url });
+
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // 7. Error Handling
+    console.error("Payment Error:", err);
+    res.status(500).json({ 
+      error: err.message || "Payment processing failed" 
+    });
   }
 }
