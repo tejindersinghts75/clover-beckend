@@ -77,9 +77,9 @@ async function createCloverOrder({ amount, originalAmount, discountAmount, coupo
       headers: {
         'Authorization': `Bearer ${CLOVER_AUTH_TOKEN}`,
         'Content-Type': 'application/json',
-      },
+      }, 
       body: JSON.stringify({
-        total: amount * 100, // Clover expects cents
+        total: amount * 100, // Clover expects 
         state: 'open'
       })
     });
