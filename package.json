@@ -1,8 +1,11 @@
 {
-  "name": "vercel-api",
+  "name": "framer-clover-backend",
   "version": "1.0.0",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
   "dependencies": {
-    "express": "^4.18.2",
-    "node-fetch": "^2.6.11"
+    "node-fetch": "^3.3.2"
   }
 }
