@@ -45,7 +45,7 @@ export default async function handler(req, res) {
 
     const finalAmount = Math.max(0, amount - discountAmount);
 
-    // Create Clover hosted checkout session with CORRECT endpoint
+    // Create Clover hosted checkout session
     const cloverResponse = await createHostedCheckoutSession({
       amount: finalAmount,
       originalAmount: amount,
@@ -79,37 +79,21 @@ export default async function handler(req, res) {
   }
 }
 
-// CORRECTED function with proper API endpoint
+// CORRECTED function - No negative line items
 async function createHostedCheckoutSession({ amount, originalAmount, discountAmount, coupon, customerData }) {
   const CLOVER_AUTH_TOKEN = process.env.CLOVER_AUTH_TOKEN;
   const CLOVER_MERCHANT_ID = process.env.CLOVER_MERCHANT_ID;
   
-  // CORRECT Clover Hosted Checkout API endpoint
+  // Correct Clover Hosted Checkout API endpoint
   const HOSTED_CHECKOUT_URL = 'https://apisandbox.dev.clover.com/invoicingcheckoutservice/v1/checkouts';
 
   try {
-    // Build line items array
-    const lineItems = [];
-    
-    // Main order line item
-    lineItems.push({
-      name: coupon ? `Order (${coupon.code} applied)` : 'Order',
-      price: originalAmount * 100, // Clover expects cents
-      unitQty: 1,
-      note: 'Online order'
-    });
+    // Create a single line item with the final discounted price
+    const lineItemName = coupon 
+      ? `Order (${coupon.code} applied - $${discountAmount} off)` 
+      : 'Order';
 
-    // Add discount as separate line item if applicable
-    if (discountAmount > 0 && coupon) {
-      lineItems.push({
-        name: `Discount: ${coupon.code}`,
-        price: -(discountAmount * 100), // Negative for discount
-        unitQty: 1,
-        note: 'Coupon discount applied'
-      });
-    }
-
-    // Checkout session payload with correct structure
+    // ✅ CORRECTED: Single line item with final discounted price
     const checkoutPayload = {
       customer: {
         email: customerData.email || 'customer@example.com',
@@ -117,14 +101,21 @@ async function createHostedCheckoutSession({ amount, originalAmount, discountAmo
         lastName: customerData.name?.split(' ').slice(1).join(' ') || 'User'
       },
       shoppingCart: {
-        lineItems: lineItems
+        lineItems: [
+          {
+            name: lineItemName,
+            price: amount * 100, // Final discounted amount in cents
+            unitQty: 1,
+            note: coupon ? `Original: $${originalAmount}, Discount: $${discountAmount}` : 'Online order'
+          }
+        ]
       }
     };
 
     console.log('Making request to:', HOSTED_CHECKOUT_URL);
     console.log('Payload:', JSON.stringify(checkoutPayload, null, 2));
 
-    // Make API request to Clover with CORRECT headers
+    // Make API request to Clover
     const checkoutResponse = await fetch(HOSTED_CHECKOUT_URL, {
       method: 'POST',
       headers: {
