@@ -38,8 +38,8 @@ export default async function handler(req, res) {
 
     const finalAmount = Math.max(0, amount - discountAmount);
 
-    // Create Clover order
-    const cloverResponse = await createCloverOrder({
+    // Create Hosted Checkout Session using the CORRECT API
+    const cloverResponse = await createHostedCheckoutSession({
       amount: finalAmount,
       originalAmount: amount,
       discountAmount,
@@ -65,56 +65,68 @@ export default async function handler(req, res) {
   }
 }
 
-async function createCloverOrder({ amount, originalAmount, discountAmount, coupon, customerData }) {
+// CORRECTED FUNCTION - Use Hosted Checkout API
+async function createHostedCheckoutSession({ amount, originalAmount, discountAmount, coupon, customerData }) {
   const CLOVER_AUTH_TOKEN = process.env.CLOVER_AUTH_TOKEN;
   const CLOVER_MERCHANT_ID = process.env.CLOVER_MERCHANT_ID;
-  const CLOVER_BASE_URL = process.env.CLOVER_BASE_URL || 'https://apisandbox.dev.clover.com';
+  
+  // Use the CORRECT Clover Hosted Checkout API endpoint
+  const HOSTED_CHECKOUT_URL = `https://scl-sandbox.dev.clover.com/v1/checkout`;
 
   try {
-    // Create order in Clover
-    const orderResponse = await fetch(`${CLOVER_BASE_URL}/v3/merchants/${CLOVER_MERCHANT_ID}/orders`, {
+    // Create checkout session payload
+    const checkoutPayload = {
+      customer: {
+        email: customerData?.email || 'test@example.com',
+        name: customerData?.name || 'Test Customer'
+      },
+      shoppingCart: {
+        lineItems: [
+          {
+            name: `Order ${coupon ? `with ${coupon.code} discount` : ''}`,
+            unitQty: 1,
+            price: amount * 100 // Clover expects cents
+          }
+        ]
+      }
+    };
+
+    // Add discount as a separate line item if applicable
+    if (discountAmount > 0 && coupon) {
+      checkoutPayload.shoppingCart.lineItems.push({
+        name: `Discount: ${coupon.code}`,
+        unitQty: 1,
+        price: -(discountAmount * 100) // Negative amount for discount
+      });
+    }
+
+    // Create checkout session
+    const checkoutResponse = await fetch(HOSTED_CHECKOUT_URL, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${CLOVER_AUTH_TOKEN}`,
         'Content-Type': 'application/json',
-      }, 
-      body: JSON.stringify({
-        total: amount * 100, // Clover expects 
-        state: 'open'
-      })
+        'X-Clover-Merchant-Id': CLOVER_MERCHANT_ID
+      },
+      body: JSON.stringify(checkoutPayload)
     });
 
-    if (!orderResponse.ok) {
-      throw new Error(`Order creation failed: ${orderResponse.status}`);
+    if (!checkoutResponse.ok) {
+      const errorText = await checkoutResponse.text();
+      console.error('Clover API Error:', errorText);
+      throw new Error(`Checkout session creation failed: ${checkoutResponse.status}`);
     }
 
-    const order = await orderResponse.json();
-
-    // Add discount if applicable
-    if (discountAmount > 0 && coupon) {
-      await fetch(`${CLOVER_BASE_URL}/v3/merchants/${CLOVER_MERCHANT_ID}/orders/${order.id}/discounts`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${CLOVER_AUTH_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: `Coupon: ${coupon.code}`,
-          amount: discountAmount * 100
-        })
-      });
-    }
-
-    const checkoutUrl = `https://sandbox.dev.clover.com/payment-links/${order.id}`;
-
+    const checkoutData = await checkoutResponse.json();
+    
     return {
       success: true,
-      checkoutUrl,
-      orderId: order.id
+      checkoutUrl: checkoutData.href, // This will be the correct working URL
+      sessionId: checkoutData.id
     };
 
   } catch (error) {
-    console.error('Clover API error:', error);
+    console.error('Clover Hosted Checkout API error:', error);
     return {
       success: false,
       error: error.message
