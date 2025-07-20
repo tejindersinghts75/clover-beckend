@@ -1,4 +1,5 @@
 export default async function handler(req, res) {
+  // CORS headers for Framer integration
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -11,20 +12,33 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  // Environment variables validation
+  const CLOVER_AUTH_TOKEN = process.env.CLOVER_AUTH_TOKEN;
+  const CLOVER_MERCHANT_ID = process.env.CLOVER_MERCHANT_ID;
+  
+  if (!CLOVER_AUTH_TOKEN || !CLOVER_MERCHANT_ID) {
+    return res.status(500).json({ 
+      error: 'Server configuration error',
+      details: 'Missing Clover credentials'
+    });
+  }
+
   try {
     const { amount, coupon, customerData } = req.body;
     
+    // Input validation
     if (!amount || amount <= 0) {
-      return res.status(400).json({ error: 'Invalid amount' });
+      return res.status(400).json({ error: 'Invalid amount provided' });
     }
 
-    // Your admin-created coupons
+    // Admin-managed coupon codes
     const coupons = [
       { code: 'SAVE10', type: 'percentage', value: 10, active: true },
       { code: 'SAVE20', type: 'percentage', value: 20, active: true },
       { code: 'SAVE50', type: 'percentage', value: 50, active: true }
     ];
 
+    // Coupon validation and discount calculation
     let discountAmount = 0;
     let appliedCoupon = null;
     
@@ -38,17 +52,21 @@ export default async function handler(req, res) {
 
     const finalAmount = Math.max(0, amount - discountAmount);
 
-    // Create Hosted Checkout Session using the CORRECT API
+    // Create Clover hosted checkout session
     const cloverResponse = await createHostedCheckoutSession({
       amount: finalAmount,
       originalAmount: amount,
       discountAmount,
       coupon: appliedCoupon,
-      customerData
+      customerData: customerData || {}
     });
 
     if (!cloverResponse.success) {
-      return res.status(500).json({ error: 'Payment processing failed' });
+      console.error('Clover checkout creation failed:', cloverResponse.error);
+      return res.status(500).json({ 
+        error: 'Payment processing failed',
+        details: cloverResponse.error
+      });
     }
 
     return res.status(200).json({
@@ -56,51 +74,60 @@ export default async function handler(req, res) {
       originalAmount: amount,
       discountAmount,
       finalAmount,
-      couponApplied: appliedCoupon?.code || null
+      couponApplied: appliedCoupon?.code || null,
+      sessionId: cloverResponse.sessionId
     });
 
   } catch (error) {
-    console.error('Checkout error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error('Checkout processing error:', error);
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
+    });
   }
 }
 
-// CORRECTED FUNCTION - Use Hosted Checkout API
+// Clover Hosted Checkout API integration
 async function createHostedCheckoutSession({ amount, originalAmount, discountAmount, coupon, customerData }) {
   const CLOVER_AUTH_TOKEN = process.env.CLOVER_AUTH_TOKEN;
   const CLOVER_MERCHANT_ID = process.env.CLOVER_MERCHANT_ID;
   
-  // Use the CORRECT Clover Hosted Checkout API endpoint
-  const HOSTED_CHECKOUT_URL = `https://scl-sandbox.dev.clover.com/v1/checkout`;
+  // Use Clover's Hosted Checkout API (correct endpoint)
+  const HOSTED_CHECKOUT_URL = 'https://scl-sandbox.dev.clover.com/v1/checkout';
 
   try {
-    // Create checkout session payload
-    const checkoutPayload = {
-      customer: {
-        email: customerData?.email || 'test@example.com',
-        name: customerData?.name || 'Test Customer'
-      },
-      shoppingCart: {
-        lineItems: [
-          {
-            name: `Order ${coupon ? `with ${coupon.code} discount` : ''}`,
-            unitQty: 1,
-            price: amount * 100 // Clover expects cents
-          }
-        ]
-      }
-    };
+    // Build line items array
+    const lineItems = [];
+    
+    // Main order line item
+    lineItems.push({
+      name: coupon ? `Order (${coupon.code} applied)` : 'Order',
+      unitQty: 1,
+      price: originalAmount * 100 // Clover expects cents
+    });
 
-    // Add discount as a separate line item if applicable
+    // Add discount as separate line item if applicable
     if (discountAmount > 0 && coupon) {
-      checkoutPayload.shoppingCart.lineItems.push({
+      lineItems.push({
         name: `Discount: ${coupon.code}`,
         unitQty: 1,
-        price: -(discountAmount * 100) // Negative amount for discount
+        price: -(discountAmount * 100) // Negative for discount
       });
     }
 
-    // Create checkout session
+    // Checkout session payload
+    const checkoutPayload = {
+      customer: {
+        email: customerData.email || 'customer@example.com',
+        firstName: customerData.name?.split(' ')[0] || 'Customer',
+        lastName: customerData.name?.split(' ').slice(1).join(' ') || 'User'
+      },
+      shoppingCart: {
+        lineItems: lineItems
+      }
+    };
+
+    // Make API request to Clover
     const checkoutResponse = await fetch(HOSTED_CHECKOUT_URL, {
       method: 'POST',
       headers: {
@@ -113,15 +140,14 @@ async function createHostedCheckoutSession({ amount, originalAmount, discountAmo
 
     if (!checkoutResponse.ok) {
       const errorText = await checkoutResponse.text();
-      console.error('Clover API Error:', errorText);
-      throw new Error(`Checkout session creation failed: ${checkoutResponse.status}`);
+      throw new Error(`Clover API returned ${checkoutResponse.status}: ${errorText}`);
     }
 
     const checkoutData = await checkoutResponse.json();
     
     return {
       success: true,
-      checkoutUrl: checkoutData.href, // This will be the correct working URL
+      checkoutUrl: checkoutData.href,
       sessionId: checkoutData.id
     };
 
