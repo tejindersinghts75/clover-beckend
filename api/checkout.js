@@ -11,11 +11,13 @@ export default async function handler(req, res) {
   const CLOVER_AUTH_TOKEN = process.env.CLOVER_AUTH_TOKEN;
   const CLOVER_MERCHANT_ID = process.env.CLOVER_MERCHANT_ID;
   
-  if (!CLOVER_AUTH_TOKEN || !CLOVER_({ 
+  if (!CLOVER_AUTH_TOKEN || !CLOVER_MERCHANT_ID) {
+    return res.status(500).json({ 
       error: 'Server configuration error',
       details: 'Missing Clover credentials'
     });
   }
+
 
   try {
     const { amount, coupon, customerData } = req.body;
