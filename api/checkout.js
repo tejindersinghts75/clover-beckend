@@ -89,7 +89,7 @@ async function createHostedCheckoutSession({ amount, originalAmount, discountAmo
    const HOSTED_CHECKOUT_URL = 'https://apisandbox.dev.clover.com/invoicingcheckoutservice/v1/checkouts';
 
   try {
-    // Create a single line item with the final discounted price
+    // Create a single line item with the final discounted 
     const lineItemName = coupon 
       ? `Order (${coupon.code} applied - $${discountAmount} off)` 
       : 'Order';
