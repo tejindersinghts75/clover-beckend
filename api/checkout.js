@@ -8,8 +8,8 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   // Environment variables validation
-  const CLOVER_AUTH_TOKEN = process.env.CLOVER_AUTH_TOKEN;
-  const CLOVER_MERCHANT_ID = process.env.CLOVER_MERCHANT_ID;
+  const CLOVER_AUTH_TOKEN = process.env.CLOVER_AUTH_TOKEN; // ⚠️ Must be PRODUCTION token
+  const CLOVER_MERCHANT_ID = process.env.CLOVER_MERCHANT_ID; // ⚠️ Must be PRODUCTION merchant ID
   
   if (!CLOVER_AUTH_TOKEN || !CLOVER_MERCHANT_ID) {
     return res.status(500).json({ 
@@ -79,22 +79,20 @@ export default async function handler(req, res) {
   }
 }
 
-// CORRECTED function - No negative line items
 async function createHostedCheckoutSession({ amount, originalAmount, discountAmount, coupon, customerData }) {
-  const CLOVER_AUTH_TOKEN = process.env.CLOVER_AUTH_TOKEN;
-  const CLOVER_MERCHANT_ID = process.env.CLOVER_MERCHANT_ID;
+  const CLOVER_AUTH_TOKEN = process.env.CLOVER_AUTH_TOKEN; // ⚠️ Must be PRODUCTION token
+  const CLOVER_MERCHANT_ID = process.env.CLOVER_MERCHANT_ID; // ⚠️ Must be PRODUCTION merchant ID
   
-  // Correct Clover Hosted Checkout API endpoint
-  //const HOSTED_CHECKOUT_URL = 'https://api.clover.com/invoicingcheckoutservice/v1/checkouts';
-   const HOSTED_CHECKOUT_URL = 'https://apisandbox.dev.clover.com/invoicingcheckoutservice/v1/checkouts';
+  // ✅ FIXED: Use production URL instead of sandbox
+  const HOSTED_CHECKOUT_URL = 'https://api.clover.com/invoicingcheckoutservice/v1/checkouts';
+  // For Europe: 'https://api.eu.clover.com/invoicingcheckoutservice/v1/checkouts'
+  // For Latin America: 'https://api.la.clover.com/invoicingcheckoutservice/v1/checkouts'
 
   try {
-    // Create a single line item with the final discounted 
     const lineItemName = coupon 
       ? `Order (${coupon.code} applied - $${discountAmount} off)` 
       : 'Order';
 
-    // ✅ CORRECTED: Single line item with final discounted price
     const checkoutPayload = {
       customer: {
         email: customerData.email || 'customer@example.com',
@@ -105,7 +103,7 @@ async function createHostedCheckoutSession({ amount, originalAmount, discountAmo
         lineItems: [
           {
             name: lineItemName,
-            price: amount * 100, // Final discounted amount in cents
+            price: amount * 100, // Final amount in cents
             unitQty: 1,
             note: coupon ? `Original: $${originalAmount}, Discount: $${discountAmount}` : 'Online order'
           }
@@ -116,14 +114,13 @@ async function createHostedCheckoutSession({ amount, originalAmount, discountAmo
     console.log('Making request to:', HOSTED_CHECKOUT_URL);
     console.log('Payload:', JSON.stringify(checkoutPayload, null, 2));
 
-    // Make API request to Clover
     const checkoutResponse = await fetch(HOSTED_CHECKOUT_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${CLOVER_AUTH_TOKEN}`,
+        'Authorization': `Bearer ${CLOVER_AUTH_TOKEN}`, // ⚠️ Must be production token
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'X-Clover-Merchant-Id': CLOVER_MERCHANT_ID
+        'X-Clover-Merchant-Id': CLOVER_MERCHANT_ID // ⚠️ Must be production merchant ID
       },
       body: JSON.stringify(checkoutPayload)
     });
