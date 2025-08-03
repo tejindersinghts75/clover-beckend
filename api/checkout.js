@@ -8,8 +8,8 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   // Environment variables
-  const CLOVER_API_KEY = process.env.CLOVER_API_KEY;
-  const CLOVER_ECOMMERCE_ID = process.env.CLOVER_ECOMMERCE_ID;
+  const CLOVER_API_KEY = process.env.CLOVER_AUTH_TOKEN;
+  const CLOVER_ECOMMERCE_ID = process.env.CLOVER_MERCHANT_ID;
   const IS_PRODUCTION = process.env.NODE_ENV === 'production';
   
   if (!CLOVER_API_KEY || !CLOVER_ECOMMERCE_ID) {
