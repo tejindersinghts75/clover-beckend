@@ -7,11 +7,12 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  // Environment variables validation
-  const CLOVER_AUTH_TOKEN = process.env.CLOVER_AUTH_TOKEN; // ⚠️ Must be PRODUCTION token
-  const CLOVER_MERCHANT_ID = process.env.CLOVER_MERCHANT_ID; // ⚠️ Must be PRODUCTION merchant ID
+  // Environment variables
+  const CLOVER_API_KEY = process.env.CLOVER_API_KEY;
+  const CLOVER_ECOMMERCE_ID = process.env.CLOVER_ECOMMERCE_ID;
+  const IS_PRODUCTION = process.env.NODE_ENV === 'production';
   
-  if (!CLOVER_AUTH_TOKEN || !CLOVER_MERCHANT_ID) {
+  if (!CLOVER_API_KEY || !CLOVER_ECOMMERCE_ID) {
     return res.status(500).json({ 
       error: 'Server configuration error',
       details: 'Missing Clover credentials'
@@ -21,11 +22,12 @@ export default async function handler(req, res) {
   try {
     const { amount, coupon, customerData } = req.body;
     
-    if (!amount || amount <= 0) {
+    // Validate amount
+    if (!amount || amount <= 0 || isNaN(amount)) {
       return res.status(400).json({ error: 'Invalid amount provided' });
     }
 
-    // Coupon validation
+    // 1. Apply coupon discount
     const coupons = [
       { code: 'SAVE10', type: 'percentage', value: 10, active: true },
       { code: 'SAVE20', type: 'percentage', value: 20, active: true },
@@ -36,117 +38,68 @@ export default async function handler(req, res) {
     let appliedCoupon = null;
     
     if (coupon) {
-      const foundCoupon = coupons.find(c => c.code === coupon && c.active);
+      const foundCoupon = coupons.find(c => 
+        c.code === coupon && c.active
+      );
+      
       if (foundCoupon) {
-        discountAmount = Math.round((amount * foundCoupon.value) / 100);
+        discountAmount = (amount * foundCoupon.value) / 100;
         appliedCoupon = foundCoupon;
       }
     }
 
     const finalAmount = Math.max(0, amount - discountAmount);
 
-    // Create Clover hosted checkout session
-    const cloverResponse = await createHostedCheckoutSession({
-      amount: finalAmount,
-      originalAmount: amount,
-      discountAmount,
-      coupon: appliedCoupon,
-      customerData: customerData || {}
+    // 2. Create Clover payment session
+    const baseUrl = IS_PRODUCTION 
+      ? 'https://api.clover.com' 
+      : 'https://sandbox.dev.clover.com';
+
+    const response = await fetch(`${baseUrl}/pay/authorize`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${CLOVER_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        amount: Math.round(finalAmount * 100), // Convert to cents
+        currency: "USD",
+        source: CLOVER_ECOMMERCE_ID,
+        redirect_url: "https://your-website.com/thank-you",
+        cancel_url: "https://your-website.com/cancel",
+        email: customerData?.email || "",
+        name: customerData?.name || ""
+      })
     });
 
-    if (!cloverResponse.success) {
-      return res.status(500).json({ 
-        error: 'Payment processing failed',
-        details: cloverResponse.error
-      });
+    if (!response.ok) {
+      const errorData = await response.text();
+      throw new Error(`Clover API: ${response.status} - ${errorData}`);
     }
 
+    const paymentData = await response.json();
+    
+    // 3. Generate checkout URL
+    const checkoutBase = IS_PRODUCTION
+      ? 'https://checkout.clover.com'
+      : 'https://checkout.sandbox.dev.clover.com';
+    
+    const checkoutUrl = `${checkoutBase}/pay?payment_id=${paymentData.id}`;
+
     return res.status(200).json({
-      checkoutUrl: cloverResponse.checkoutUrl,
+      checkoutUrl,
       originalAmount: amount,
       discountAmount,
       finalAmount,
       couponApplied: appliedCoupon?.code || null,
-      sessionId: cloverResponse.sessionId
+      paymentId: paymentData.id
     });
 
   } catch (error) {
-    console.error('Checkout processing error:', error);
+    console.error('Payment Error:', error);
     return res.status(500).json({ 
-      error: 'Internal server error',
+      error: 'Payment processing failed',
       details: error.message 
     });
-  }
-}
-
-async function createHostedCheckoutSession({ amount, originalAmount, discountAmount, coupon, customerData }) {
-  const CLOVER_AUTH_TOKEN = process.env.CLOVER_AUTH_TOKEN; // ⚠️ Must be PRODUCTION token
-  const CLOVER_MERCHANT_ID = process.env.CLOVER_MERCHANT_ID; // ⚠️ Must be PRODUCTION merchant ID
-  
-  // ✅ FIXED: Use production URL instead of sandbox
-  const HOSTED_CHECKOUT_URL = 'https://api.clover.com/invoicingcheckoutservice/v1/checkouts';
-  // For Europe: 'https://api.eu.clover.com/invoicingcheckoutservice/v1/checkouts'
-  // For Latin America: 'https://api.la.clover.com/invoicingcheckoutservice/v1/checkouts'
-
-  try {
-    const lineItemName = coupon 
-      ? `Order (${coupon.code} applied - $${discountAmount} off)` 
-      : 'Order';
-
-    const checkoutPayload = {
-      customer: {
-        email: customerData.email || 'customer@example.com',
-        firstName: customerData.name?.split(' ')[0] || 'Customer',
-        lastName: customerData.name?.split(' ').slice(1).join(' ') || 'User'
-      },
-      shoppingCart: {
-        lineItems: [
-          {
-            name: lineItemName,
-            price: amount * 100, // Final amount in cents
-            unitQty: 1,
-            note: coupon ? `Original: $${originalAmount}, Discount: $${discountAmount}` : 'Online order'
-          }
-        ]
-      }
-    };
-
-    console.log('Making request to:', HOSTED_CHECKOUT_URL);
-    console.log('Payload:', JSON.stringify(checkoutPayload, null, 2));
-
-    const checkoutResponse = await fetch(HOSTED_CHECKOUT_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${CLOVER_AUTH_TOKEN}`, // ⚠️ Must be production token
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'X-Clover-Merchant-Id': CLOVER_MERCHANT_ID // ⚠️ Must be production merchant ID
-      },
-      body: JSON.stringify(checkoutPayload)
-    });
-
-    console.log('Response status:', checkoutResponse.status);
-
-    if (!checkoutResponse.ok) {
-      const errorText = await checkoutResponse.text();
-      console.error('Clover API Error Response:', errorText);
-      throw new Error(`Clover API returned ${checkoutResponse.status}: ${errorText}`);
-    }
-
-    const checkoutData = await checkoutResponse.json();
-    console.log('Success response:', checkoutData);
-    
-    return {
-      success: true,
-      checkoutUrl: checkoutData.href,
-      sessionId: checkoutData.checkoutSessionId
-    };
-
-  } catch (error) {
-    console.error('Clover Hosted Checkout API error:', error);
-    return {
-      success: false,
-      error: error.message
-    };
   }
 }
