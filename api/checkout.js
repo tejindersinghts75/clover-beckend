@@ -95,7 +95,7 @@ async function createHostedCheckoutSession({ amount, originalAmount, discountAmo
   const CLOVER_MERCHANT_ID = process.env.CLOVER_MERCHANT_ID;
   
   // Correct Clover Hosted Checkout API endpoin
-  const HOSTED_CHECKOUT_URL = 'https://apisandbox.dev.clover.com/invoicingcheckoutservice/v1/checkouts';
+  const HOSTED_CHECKOUT_URL = 'https://clover.com/invoicingcheckoutservice/v1/checkouts';
 
 
   try {
